@@ -1,0 +1,57 @@
+# Jekyll configuration for velnor-runbooks GitHub Pages
+# Published at: https://velnor.github.io/velnor-runbooks/
+# (org: VelnorLabs per DEC-0056)
+
+title: "Velnor Runbooks"
+description: "Operational runbooks, incident response playbooks, and onboarding guides for Velnor V1."
+baseurl: "/velnor-runbooks"
+url: "https://VelnorLabs.github.io"
+
+# Theme
+theme: minima
+
+# Author
+author:
+  name: "Velnor Engineering"
+  email: "engineering@velnor.com"
+
+# Navigation
+header_pages:
+  - runbooks/operations/index.md
+  - runbooks/incidents/index.md
+  - runbooks/onboarding/index.md
+
+# Markdown engine
+markdown: kramdown
+kramdown:
+  input: GFM
+  syntax_highlighter: rouge
+
+# Plugins
+plugins:
+  - jekyll-feed
+  - jekyll-seo-tag
+
+# Collections
+collections:
+  runbooks:
+    output: true
+    permalink: /:collection/:path/
+
+# Exclude build artifacts from the site
+exclude:
+  - Gemfile
+  - Gemfile.lock
+  - node_modules
+  - vendor
+  - .github
+  - CODEOWNERS
+  - CONTRIBUTING.md
+
+# Front-matter defaults
+defaults:
+  - scope:
+      path: "runbooks"
+      type: "pages"
+    values:
+      layout: "default"

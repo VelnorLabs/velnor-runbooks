@@ -1,0 +1,15 @@
+# velnor-runbooks CODEOWNERS
+# Owning personas: Engineering (primary), Architect (incident response co-owner)
+# Per DEC-0056: org is VelnorLabs
+
+* @VelnorLabs/engineering
+
+# Incident playbooks require both Engineering and Architecture sign-off
+/runbooks/incidents/ @VelnorLabs/engineering @VelnorLabs/architecture
+
+# Operations and onboarding: Engineering only
+/runbooks/operations/ @VelnorLabs/engineering
+/runbooks/onboarding/ @VelnorLabs/engineering
+
+# Jekyll config changes require lead review
+/_config.yml @VelnorLabs/engineering @VelnorLabs/architecture
