@@ -18,7 +18,7 @@ _Content seeded in T-W0-031. This index is a placeholder._
 
 | Runbook | Description | Status |
 |---------|-------------|--------|
-| _(T-W0-031)_ | First 3 runbooks: Bedrock outage · Aurora failover · tenant onboarding | Pending |
+| [Aurora failover (planned + unplanned)](aurora-failover.md) | Multi-AZ promotion semantics; planned + unplanned; smoke check after | Live (T-W0-031) |
 
 ---
 

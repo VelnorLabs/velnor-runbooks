@@ -24,12 +24,10 @@ Structured playbooks for diagnosing and resolving production incidents.
 
 ## Available playbooks
 
-_Content seeded in T-W0-031. This index is a placeholder._
-
-| Playbook | Severity | Status |
-|----------|----------|--------|
-| Bedrock outage / model unavailability | SEV-2 | Pending (T-W0-031) |
-| Aurora failover | SEV-1 | Pending (T-W0-031) |
+| Playbook | Severity | Alarm name | Status |
+|----------|----------|------------|--------|
+| [Bedrock outage / model unavailability](bedrock-outage.md) | SEV-2 | `velnor-bedrock-error-rate-high` | Live (T-W0-031) |
+| [Tenant isolation alarm response](isolation-alarm-response.md) | SEV-1 | `velnor-tenant-isolation-breach` | Live (T-W0-031) |
 
 ---
 
