@@ -1,0 +1,39 @@
+# markdownlint configuration for velnor-runbooks
+default: true
+
+# MD013: line length — allow longer lines (runbooks have long command lines)
+MD013:
+  line_length: 300
+  tables: false
+  code_blocks: false
+  headings: false
+
+# MD025: multiple top-level headings — Jekyll front-matter titles cause this
+MD025: false
+
+# MD026: no trailing punctuation in headings — runbooks use "Step N:" format
+MD026: false
+
+# MD029: ordered list item prefix — allow natural numbering in runbooks
+MD029: false
+
+# MD031: blank lines around fenced code blocks — relax for runbooks
+MD031: false
+
+# MD032: blank lines around lists — relax for runbooks
+MD032: false
+
+# MD033: no inline HTML — allow for tables in runbooks
+MD033: false
+
+# MD034: no bare URLs — allow in runbooks for command output and references
+MD034: false
+
+# MD040: fenced code blocks must have a language — relax for runbooks
+MD040: false
+
+# MD041: first line must be top-level heading — front-matter files start with ---
+MD041: false
+
+# MD060: table column style — relax compact vs padded preference
+MD060: false
