@@ -3,7 +3,7 @@
 > Velnor V1 · Ops documentation · Published via GitHub Pages (Jekyll)
 
 **Owning personas:** Engineering (primary), Architect (incident response co-owner)  
-**Published at:** `https://VelnorLabs.github.io/velnor-runbooks/` (once GitHub Pages enabled)
+**Published at:** `https://velnorlabs.github.io/velnor-runbooks/`
 
 ---
 
@@ -56,4 +56,4 @@ velnor-runbooks/
 
 1. Go to **Settings → Pages** in the GitHub repo
 2. Set source to `main` branch, `/ (root)` folder
-3. Site will be available at `https://VelnorLabs.github.io/velnor-runbooks/`
+3. Site will be available at `https://velnorlabs.github.io/velnor-runbooks/`

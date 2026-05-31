@@ -5,7 +5,7 @@
 title: "Velnor Runbooks"
 description: "Operational runbooks, incident response playbooks, and onboarding guides for Velnor V1."
 baseurl: "/velnor-runbooks"
-url: "https://VelnorLabs.github.io"
+url: "https://velnorlabs.github.io"
 
 # Theme
 theme: minima
