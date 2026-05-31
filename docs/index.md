@@ -32,8 +32,8 @@ Tenant provisioning guides and engineer setup procedures.
 
 | Severity | Response time | Runbook |
 |----------|---------------|---------|
-| SEV-1 | 15 min | [Bedrock Outage](../runbooks/incidents/bedrock-outage.md) · [Aurora Failover](../runbooks/incidents/aurora-failover.md) |
-| SEV-2 | 1 hour | [Isolation Alarm](../runbooks/incidents/isolation-alarm-response.md) |
+| SEV-1 | 15 min | [Aurora Failover](../runbooks/operations/aurora-failover.md) · [Isolation Alarm](../runbooks/incidents/isolation-alarm-response.md) |
+| SEV-2 | 1 hour | [Bedrock Outage](../runbooks/incidents/bedrock-outage.md) |
 | SEV-3 | 4 hours | [Atlas Migration Failure](../runbooks/incidents/atlas-migration-failure.md) |
 
 ---
