@@ -19,6 +19,7 @@ _Content seeded in T-W0-031. This index is a placeholder._
 | Runbook | Description | Status |
 |---------|-------------|--------|
 | [Aurora failover (planned + unplanned)](aurora-failover.md) | Multi-AZ promotion semantics; planned + unplanned; smoke check after | Live (T-W0-031) |
+| [Dev DB validation (bootstrap + migrate)](dev-db-validation.md) | Verify Aurora bootstrap + Atlas migrate from a laptop via the SSM bastion | Live (LE-020/LE-022) |
 
 ---
 
