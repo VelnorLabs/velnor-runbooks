@@ -42,14 +42,32 @@ aws ssm start-session --region us-east-1 --profile velnor-dev \
   --parameters "{\"host\":[\"$AURORA\"],\"portNumber\":[\"5432\"],\"localPortNumber\":[\"5432\"]}"
 ```
 
-Leave running. In another terminal (password from Secrets Manager, the
-Aurora-managed master secret; `sslmode=require` is mandatory):
+Leave running. In another terminal, fetch the master password. The cluster runs
+with `manage_master_user_password = true`, so AWS owns a rotating Secrets
+Manager secret (named `rds!cluster-…`); resolve its ARN from the cluster rather
+than guessing the name:
 
 ```bash
-export PGPASSWORD='<from Secrets Manager: velnor-dev master user secret>'
+# 1. ARN of the RDS-managed master-user secret
+SECRET_ARN=$(aws rds describe-db-clusters \
+  --region us-east-1 --profile velnor-dev \
+  --db-cluster-identifier velnor-dev \
+  --query 'DBClusters[0].MasterUserSecret.SecretArn' --output text)
+
+# 2. Pull the password out of the secret JSON {"username":...,"password":...}
+export PGPASSWORD=$(aws secretsmanager get-secret-value \
+  --region us-east-1 --profile velnor-dev --secret-id "$SECRET_ARN" \
+  --query 'SecretString' --output text \
+  | python3 -c 'import sys,json; print(json.load(sys.stdin)["password"])')
+
 export PGSSLMODE=require    # TLS is mandatory (proxy/Aurora reject plaintext)
 PSQL='psql -h localhost -p 5432 -U velnor_admin -d postgres -v ON_ERROR_STOP=1'
 ```
+
+> Requires `secretsmanager:GetSecretValue` on that secret **and** `kms:Decrypt`
+> on the key encrypting it (RDS-managed secrets are KMS-encrypted) — the account
+> admin / `velnor-dev` profile has both. Never paste the password into a file or
+> the runbook; it rotates.
 
 ## 1. LE-022 — Aurora bootstrap verification
 
