@@ -83,7 +83,7 @@ psql "host=127.0.0.1 port=5432 dbname=postgres user=velnor_admin sslmode=require
 > REQUIRED` and rejects passwords entirely, so this password path only works
 > against the **Aurora cluster endpoint** tunnel, not the proxy (see bastion
 > README for the proxy IAM-token path).
-
+>
 > Requires `secretsmanager:GetSecretValue` on that secret **and** `kms:Decrypt`
 > on the key encrypting it (RDS-managed secrets are KMS-encrypted) — the account
 > admin / `velnor-dev` profile has both. Never paste the password into a file or
