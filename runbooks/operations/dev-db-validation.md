@@ -48,21 +48,41 @@ Manager secret (named `rds!cluster-…`); resolve its ARN from the cluster rathe
 than guessing the name:
 
 ```bash
+# Clear any stale/whitespace-corrupted password from a prior attempt — a
+# lingering PGPASSWORD silently overrides the fetch and causes a confusing
+# "password authentication failed" even with correct creds.
+unset PGPASSWORD
+
 # 1. ARN of the RDS-managed master-user secret
 SECRET_ARN=$(aws rds describe-db-clusters \
   --region us-east-1 --profile velnor-dev \
   --db-cluster-identifier velnor-dev \
   --query 'DBClusters[0].MasterUserSecret.SecretArn' --output text)
 
-# 2. Pull the password out of the secret JSON {"username":...,"password":...}
-export PGPASSWORD=$(aws secretsmanager get-secret-value \
+# 2. Print the password (one-off) and confirm the secret's user is velnor_admin
+aws secretsmanager get-secret-value \
   --region us-east-1 --profile velnor-dev --secret-id "$SECRET_ARN" \
   --query 'SecretString' --output text \
-  | python3 -c 'import sys,json; print(json.load(sys.stdin)["password"])')
-
-export PGSSLMODE=require    # TLS is mandatory (proxy/Aurora reject plaintext)
-PSQL='psql -h localhost -p 5432 -U velnor_admin -d postgres -v ON_ERROR_STOP=1'
+  | python3 -c 'import sys,json; d=json.load(sys.stdin); print("user:", d["username"]); print("password:", d["password"])'
 ```
+
+Then connect with a **conninfo string** and paste the password at the prompt —
+do NOT rely on `PGPASSWORD` (env-var contamination is the #1 cause of a false
+"password authentication failed" here):
+
+```bash
+export PGSSLMODE=require    # TLS is mandatory (proxy/Aurora reject plaintext)
+PSQL='psql "host=127.0.0.1 port=5432 dbname=postgres user=velnor_admin sslmode=require" -v ON_ERROR_STOP=1'
+
+# interactive: paste the password from step 2 at the "Password:" prompt
+psql "host=127.0.0.1 port=5432 dbname=postgres user=velnor_admin sslmode=require"
+```
+
+> Use `127.0.0.1`, not `localhost` — `localhost` can resolve to the Unix socket
+> (`/tmp/.s.PGSQL.5432`) and bypass the tunnel. The RDS Proxy is `iam_auth =
+> REQUIRED` and rejects passwords entirely, so this password path only works
+> against the **Aurora cluster endpoint** tunnel, not the proxy (see bastion
+> README for the proxy IAM-token path).
 
 > Requires `secretsmanager:GetSecretValue` on that secret **and** `kms:Decrypt`
 > on the key encrypting it (RDS-managed secrets are KMS-encrypted) — the account
