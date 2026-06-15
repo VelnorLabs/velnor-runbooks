@@ -30,7 +30,16 @@ blocked on DB reachability:
 ## 0. Open the tunnel
 
 Use **Aurora-direct** for these checks (DDL + inspection; pooler-free is
-preferred):
+preferred). The easiest way is the helper script:
+
+```bash
+cd velnor-iac
+./scripts/bastion.sh up          # apply + wait for SSM (only if not already up)
+./scripts/bastion.sh tunnel      # Aurora-direct 5432 → localhost:5432 (default)
+# (./scripts/bastion.sh tunnel proxy  for the RDS Proxy IAM path)
+```
+
+Or do it by hand:
 
 ```bash
 BID=$(cd velnor-iac/accounts/dev/bastion && tofu output -raw bastion_instance_id)
@@ -152,7 +161,7 @@ Two things to know before running:
   via Atlas `--schema`; no `tenant_` prefix is added). So at Wave-0, with no
   tenant provisioned, you create a throwaway schema first.
 - The runner's dir bug (it looked for a non-existent per-slug sub-dir) is fixed
-  in plane-api PR #11 — pull `main` before building.
+  on plane-api `main` (PR #11, merged) — pull `main` before building.
 
 ### Self-contained validation (no real tenant needed)
 
@@ -220,5 +229,6 @@ separately, don't expect them to pass here:
 
 ## 4. Close the tunnel
 
-`Ctrl-C` the `start-session` terminal. Tear the bastion down at Wave-0 close:
-`cd velnor-iac/accounts/dev/bastion && tofu destroy`.
+`Ctrl-C` the `start-session` terminal (or the `bastion.sh tunnel` one). Tear the
+bastion down at Wave-0 close: `velnor-iac/scripts/bastion.sh down` (or
+`cd velnor-iac/accounts/dev/bastion && tofu destroy`).
