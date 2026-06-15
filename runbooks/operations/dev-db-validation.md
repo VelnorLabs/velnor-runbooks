@@ -142,48 +142,69 @@ SELECT count(*) FROM velnor.tenants;           -- expect 0 until first tenant pr
 
 ## 2. LE-020 — Atlas migrate runner
 
-The earlier failure ("migrate demands `Tenant slug (required)` / `-to-version
-(required)`") was a **missing-required-flag invocation**, not a bug. Correct
-usage (`velnor-plane-api/cmd/migrate`):
+Two things to know before running:
+
+- The earlier "migrate demands `Tenant slug (required)`" was a
+  **missing-required-flag invocation**, not a bug — every sub-command needs
+  `-tenant`/`-tenants`.
+- The migrate runner does **not create the tenant schema** — it applies the
+  shared catalog into an *existing* schema (the slug **is** the schema name,
+  via Atlas `--schema`; no `tenant_` prefix is added). So at Wave-0, with no
+  tenant provisioned, you create a throwaway schema first.
+- The runner's dir bug (it looked for a non-existent per-slug sub-dir) is fixed
+  in plane-api PR #11 — pull `main` before building.
+
+### Self-contained validation (no real tenant needed)
 
 ```bash
-# Build
-cd velnor-plane-api && go build -o ./bin/migrate ./cmd/migrate
+cd velnor-plane-api && git pull origin main      # include PR #11
+go build -o ./bin/migrate ./cmd/migrate
 
-# DSN over the open tunnel (sslmode=require)
-export MIGRATE_DSN='postgres://velnor_admin:'"$PGPASSWORD"'@localhost:5432/postgres?sslmode=require'
+# DSN over the open tunnel (127.0.0.1, sslmode=require). Use a conninfo-style
+# DSN; the password is the master secret (see §0) or omit and rely on a prompt.
+export MIGRATE_DSN="postgres://velnor_admin@127.0.0.1:5432/postgres?sslmode=require"
+export PGPASSWORD='<paste master password>'      # libpq picks this up for the DSN
 
-# Apply for ONE tenant — -tenant is REQUIRED
-./bin/migrate apply   -tenant acme            -dsn "$MIGRATE_DSN"
+# 1. Create a throwaway tenant schema (the runner expects it to exist).
+psql "host=127.0.0.1 port=5432 dbname=postgres user=velnor_admin sslmode=require" \
+  -c 'CREATE SCHEMA IF NOT EXISTS val_smoke;'
 
-# Apply for MANY tenants in parallel — -tenants (CSV) REQUIRED
-./bin/migrate apply-all -tenants acme,globex   -dsn "$MIGRATE_DSN" -workers 10
+# 2. Apply the shared catalog into it (-tenant = the schema name).
+./bin/migrate apply -tenant val_smoke -dsn "$MIGRATE_DSN"   # expect exit 0
 
-# Status
-./bin/migrate status  -tenant acme            -dsn "$MIGRATE_DSN"
-
-# Roll back — both -tenant and -to-version REQUIRED
-./bin/migrate down    -tenant acme -to-version 20260101000000 -dsn "$MIGRATE_DSN" \
-  -dev-url 'postgres://...localhost.../atlas_dev_schema?sslmode=require'
+# 3. Status
+./bin/migrate status -tenant val_smoke -dsn "$MIGRATE_DSN"
 ```
 
-Flag notes:
-- `-skip-lock` defaults `true` (S-04: required for 100-tenant parallel apply).
-- `down` needs `-dev-url` pointing at `atlas_dev_schema` (created by bootstrap).
-
-### Verify per-tenant schema apply
-
-After `apply -tenant acme`:
+### Verify
 
 ```sql
--- schema-per-tenant (DEC-0035 rev.2): a tenant_<slug> schema exists
-SELECT nspname FROM pg_namespace WHERE nspname = 'tenant_acme';
--- Atlas revision tracking present
-SELECT count(*) FROM tenant_acme.atlas_schema_revisions;   -- > 0 after apply
+-- the catalog's tables landed in the schema (not the public/velnor schema)
+SELECT count(*) FROM information_schema.tables WHERE table_schema = 'val_smoke';
+-- Atlas revision tracking present in THIS schema (slug == schema name)
+SELECT count(*) FROM val_smoke.atlas_schema_revisions;   -- > 0 after apply
 ```
 
-**Pass criteria:** `migrate apply -tenant <slug>` exits 0; `tenant_<slug>`
-schema + `atlas_schema_revisions` rows exist.
+**Pass criteria:** `migrate apply -tenant val_smoke` exits 0; `val_smoke`
+schema has the catalog tables + `atlas_schema_revisions` rows.
+
+### Clean up
+
+```sql
+DROP SCHEMA val_smoke CASCADE;
+```
+
+### Other sub-commands (reference)
+
+```bash
+# Many tenants in parallel — -tenants (CSV) REQUIRED (schemas must pre-exist)
+./bin/migrate apply-all -tenants t1,t2 -dsn "$MIGRATE_DSN" -workers 10
+# Roll back — -tenant + -to-version REQUIRED; -dev-url points at atlas_dev_schema
+./bin/migrate down -tenant val_smoke -to-version 20260524000001 -dsn "$MIGRATE_DSN" \
+  -dev-url "postgres://velnor_admin@127.0.0.1:5432/postgres?search_path=atlas_dev_schema&sslmode=require"
+```
+
+- `-skip-lock` defaults `true` (S-04: required for parallel per-schema apply).
 
 ## 3. Known separate gaps (NOT DB-reachability)
 
