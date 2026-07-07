@@ -1,0 +1,112 @@
+{
+  "/Users/sushi/Documents/CoWork/SMB-SaaS/Repositories/velnor-runbooks/.github/workflows/ci.yml": {
+    "mtime": 1780190930.5224655,
+    "ast_hash": "b135b77a32921a2fbf06ffaa0e28c2fa",
+    "semantic_hash": "b135b77a32921a2fbf06ffaa0e28c2fa"
+  },
+  "/Users/sushi/Documents/CoWork/SMB-SaaS/Repositories/velnor-runbooks/.markdownlint.yaml": {
+    "mtime": 1780190930.522736,
+    "ast_hash": "cb52baf4844ca4d01dae68567392d01f",
+    "semantic_hash": "cb52baf4844ca4d01dae68567392d01f"
+  },
+  "/Users/sushi/Documents/CoWork/SMB-SaaS/Repositories/velnor-runbooks/.pre-commit-config.yaml": {
+    "mtime": 1780190930.5230281,
+    "ast_hash": "7fb93dcd16dc28741f2390ebf04e80ac",
+    "semantic_hash": "7fb93dcd16dc28741f2390ebf04e80ac"
+  },
+  "/Users/sushi/Documents/CoWork/SMB-SaaS/Repositories/velnor-runbooks/CONTRIBUTING.md": {
+    "mtime": 1780190930.5239084,
+    "ast_hash": "a4d77b7117673311f715c9ef2a62ba6b",
+    "semantic_hash": "a4d77b7117673311f715c9ef2a62ba6b"
+  },
+  "/Users/sushi/Documents/CoWork/SMB-SaaS/Repositories/velnor-runbooks/README.md": {
+    "mtime": 1783394753.1015866,
+    "ast_hash": "02588c0e9d0694b7789f622d5cf09067",
+    "semantic_hash": "02588c0e9d0694b7789f622d5cf09067"
+  },
+  "/Users/sushi/Documents/CoWork/SMB-SaaS/Repositories/velnor-runbooks/SECURITY.md": {
+    "mtime": 1780190930.5246537,
+    "ast_hash": "1e2b0d0db5b4022b8917b1a4955a4cc4",
+    "semantic_hash": "1e2b0d0db5b4022b8917b1a4955a4cc4"
+  },
+  "/Users/sushi/Documents/CoWork/SMB-SaaS/Repositories/velnor-runbooks/_config.yml": {
+    "mtime": 1780190930.5248575,
+    "ast_hash": "090b38e0daac1a9bb931d5c2c745d63f",
+    "semantic_hash": "090b38e0daac1a9bb931d5c2c745d63f"
+  },
+  "/Users/sushi/Documents/CoWork/SMB-SaaS/Repositories/velnor-runbooks/docs/index.md": {
+    "mtime": 1780191127.9061155,
+    "ast_hash": "56d0b335287e69a9d580e3e7881986a9",
+    "semantic_hash": "56d0b335287e69a9d580e3e7881986a9"
+  },
+  "/Users/sushi/Documents/CoWork/SMB-SaaS/Repositories/velnor-runbooks/incidents/bedrock-outage.md": {
+    "mtime": 1783394123.047735,
+    "ast_hash": "4ff24814f219a0327cb65437a085ab35",
+    "semantic_hash": "4ff24814f219a0327cb65437a085ab35"
+  },
+  "/Users/sushi/Documents/CoWork/SMB-SaaS/Repositories/velnor-runbooks/incidents/isolation-alarm-response.md": {
+    "mtime": 1783394123.0480492,
+    "ast_hash": "fea319a32e8806e912e0e609e6f3f1ab",
+    "semantic_hash": "fea319a32e8806e912e0e609e6f3f1ab"
+  },
+  "/Users/sushi/Documents/CoWork/SMB-SaaS/Repositories/velnor-runbooks/index.md": {
+    "mtime": 1783394123.0482554,
+    "ast_hash": "8971a81c836d2fa9b9609a3360e2e324",
+    "semantic_hash": "8971a81c836d2fa9b9609a3360e2e324"
+  },
+  "/Users/sushi/Documents/CoWork/SMB-SaaS/Repositories/velnor-runbooks/operations/aurora-failover.md": {
+    "mtime": 1783394123.048972,
+    "ast_hash": "4139fcb4cb7e0a257f25b9dad3b0a844",
+    "semantic_hash": "4139fcb4cb7e0a257f25b9dad3b0a844"
+  },
+  "/Users/sushi/Documents/CoWork/SMB-SaaS/Repositories/velnor-runbooks/operations/tenant-deletion.md": {
+    "mtime": 1783394753.1018286,
+    "ast_hash": "ef614456c6e8dfc08061e265fa010a60",
+    "semantic_hash": "ef614456c6e8dfc08061e265fa010a60"
+  },
+  "/Users/sushi/Documents/CoWork/SMB-SaaS/Repositories/velnor-runbooks/runbooks/incidents/bedrock-outage.md": {
+    "mtime": 1779677432.003926,
+    "ast_hash": "4ff24814f219a0327cb65437a085ab35",
+    "semantic_hash": "4ff24814f219a0327cb65437a085ab35"
+  },
+  "/Users/sushi/Documents/CoWork/SMB-SaaS/Repositories/velnor-runbooks/runbooks/incidents/index.md": {
+    "mtime": 1779677587.3030534,
+    "ast_hash": "72dc31ac9478c1dd8642068f7220174d",
+    "semantic_hash": "72dc31ac9478c1dd8642068f7220174d"
+  },
+  "/Users/sushi/Documents/CoWork/SMB-SaaS/Repositories/velnor-runbooks/runbooks/incidents/isolation-alarm-response.md": {
+    "mtime": 1779677578.228438,
+    "ast_hash": "fea319a32e8806e912e0e609e6f3f1ab",
+    "semantic_hash": "fea319a32e8806e912e0e609e6f3f1ab"
+  },
+  "/Users/sushi/Documents/CoWork/SMB-SaaS/Repositories/velnor-runbooks/runbooks/onboarding/index.md": {
+    "mtime": 1779677154.5549064,
+    "ast_hash": "6fda5596377f8fbd340b3ba7a213faf7",
+    "semantic_hash": "6fda5596377f8fbd340b3ba7a213faf7"
+  },
+  "/Users/sushi/Documents/CoWork/SMB-SaaS/Repositories/velnor-runbooks/runbooks/operations/atlas-migration-failure.md": {
+    "mtime": 1779725911.0054793,
+    "ast_hash": "45b85351cebdabda559d6ad012a5197c",
+    "semantic_hash": "45b85351cebdabda559d6ad012a5197c"
+  },
+  "/Users/sushi/Documents/CoWork/SMB-SaaS/Repositories/velnor-runbooks/runbooks/operations/aurora-failover.md": {
+    "mtime": 1779677512.9090137,
+    "ast_hash": "4139fcb4cb7e0a257f25b9dad3b0a844",
+    "semantic_hash": "4139fcb4cb7e0a257f25b9dad3b0a844"
+  },
+  "/Users/sushi/Documents/CoWork/SMB-SaaS/Repositories/velnor-runbooks/runbooks/operations/dev-db-validation.md": {
+    "mtime": 1783394123.0493374,
+    "ast_hash": "43380752a521b4f09b79702a388696bb",
+    "semantic_hash": "43380752a521b4f09b79702a388696bb"
+  },
+  "/Users/sushi/Documents/CoWork/SMB-SaaS/Repositories/velnor-runbooks/runbooks/operations/index.md": {
+    "mtime": 1783394753.102227,
+    "ast_hash": "93d8ee86e23c484417186ecec3a0e301",
+    "semantic_hash": "93d8ee86e23c484417186ecec3a0e301"
+  },
+  "/Users/sushi/Documents/CoWork/SMB-SaaS/Repositories/velnor-runbooks/runbooks/operations/tenant-deletion.md": {
+    "mtime": 1783394753.102352,
+    "ast_hash": "ef614456c6e8dfc08061e265fa010a60",
+    "semantic_hash": "ef614456c6e8dfc08061e265fa010a60"
+  }
+}

@@ -2,3 +2,7 @@
 .vscode/
 *.swp
 .DS_Store
+
+# graphify local state (machine-specific interpreter path + extraction cache)
+graphify-out/.graphify_python
+graphify-out/cache/
