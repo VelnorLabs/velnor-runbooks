@@ -42,6 +42,16 @@ velnor-runbooks/
 
 ---
 
+## Status
+
+- [`operations/tenant-deletion.md`](operations/tenant-deletion.md) — Tenant deletion runbook.
+  **T-W3-021**: Architect draft, awaiting founder Architect sign-off note before `done_verified`.
+  Gates **T-W3-022** (deletion endpoint) and **T-W3-023** (Dev tenant dry-run). Mirrored at
+  [`runbooks/operations/tenant-deletion.md`](runbooks/operations/tenant-deletion.md) for the
+  published Jekyll site.
+
+---
+
 ## Contributing
 
 1. All runbooks follow the standard template: **Purpose · Trigger · Steps · Rollback · Contacts**
