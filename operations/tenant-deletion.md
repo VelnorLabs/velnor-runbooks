@@ -324,10 +324,11 @@ aws s3api list-objects-v2 --profile velnor-dev --region us-east-1 \
         --bucket "$UPLOADS_BUCKET" --key "$key" \
         --tagging 'TagSet=[{Key=tenant_archived,Value=true}]'
     done
-# <tenant_prefix>: DEC-0047 key pattern is {tenant_id}/original/{doc_id}.{ext} —
-# use the tenant_id captured up front. (T-W3-022 lists the tenant prefix in the
-# uploads bucket the same way; verify the deployed prefix convention during the
-# T-W3-023 dry-run and correct this line if it differs.)
+# <tenant_prefix>: T-W3-022 tags tenant/<slug>/ (the upload-path convention).
+# NOTE a known discrepancy: DEC-0047's declared key pattern is
+# {tenant_id}/original/{doc_id}.{ext} — if any objects exist under the
+# tenant_id-keyed prefix, tag that prefix too. The T-W3-023 dry-run checks
+# both and records which one actually holds objects in Dev.
 ```
 
 **Count what you touched** — `users_disabled` and `s3_objects_tagged` go into the Step 6
