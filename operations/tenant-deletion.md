@@ -184,8 +184,8 @@ cd velnor-iac
 ./scripts/bastion.sh tunnel      # Aurora-direct 5432 -> localhost:5432
 ```
 
-Capture the tenant's identifiers up front — you need both (`tenant_id` keys the S3 prefix and
-the audit payload; the schema name is derived from `slug` with `-`→`_`):
+Capture the tenant's identifiers up front — you need both (`tenant_id` keys the audit
+payload; `slug` keys the S3 prefix and, with `-`→`_`, derives the schema name):
 
 ```sql
 SELECT tenant_id, slug, display_name, plan, state
@@ -317,18 +317,16 @@ aws cognito-idp list-users --profile velnor-dev --region us-east-1 \
 # 5b. Tag every object under the tenant's uploads prefix (objects are NOT
 #     deleted, NOT lifecycle-expired — tagged only)
 aws s3api list-objects-v2 --profile velnor-dev --region us-east-1 \
-  --bucket "$UPLOADS_BUCKET" --prefix "<tenant_prefix>/" \
+  --bucket "$UPLOADS_BUCKET" --prefix "<slug>/" \
   --query 'Contents[].Key' --output json | jq -r '.[]' \
   | while read -r key; do
       aws s3api put-object-tagging --profile velnor-dev --region us-east-1 \
         --bucket "$UPLOADS_BUCKET" --key "$key" \
         --tagging 'TagSet=[{Key=tenant_archived,Value=true}]'
     done
-# <tenant_prefix>: T-W3-022 tags tenant/<slug>/ (the upload-path convention).
-# NOTE a known discrepancy: DEC-0047's declared key pattern is
-# {tenant_id}/original/{doc_id}.{ext} — if any objects exist under the
-# tenant_id-keyed prefix, tag that prefix too. The T-W3-023 dry-run checks
-# both and records which one actually holds objects in Dev.
+# The uploads keyspace is <slug>/... — DEC-0047, founder-confirmed 2026-07-18.
+# This is the single convention: the tenant/<slug>/ variant is dead, and no
+# tenant_id-keyed prefix exists. Tag <slug>/ only.
 ```
 
 **Count what you touched** — `users_disabled` and `s3_objects_tagged` go into the Step 6
