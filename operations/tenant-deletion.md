@@ -1,6 +1,6 @@
 ---
 layout: default
-title: "Tenant Deletion (Architect Draft — Awaiting Sign-off)"
+title: "Tenant Deletion — Archive Semantics (Founder-Approved)"
 nav_order: 4
 parent: "Operations Runbooks"
 adr_refs:
@@ -9,118 +9,135 @@ adr_refs:
   - DEC-0065
   - DEC-0050
   - DEC-0046
-severity: destructive / irreversible after the DR preservation window closes
-last_updated: 2026-07-06
-status: "DRAFT — T-W3-021, awaiting founder Architect sign-off"
+severity: destructive-lite / reversible while archived; hard purge (future) is irreversible
+last_updated: 2026-07-18
+status: "ARCHIVE SEMANTICS — founder-approved 2026-07-18 (W3 design); dry-run T-W3-023 pending"
 ---
 
-# Tenant Deletion
+# Tenant Deletion (Archive + Tag)
 
-> **Status:** DRAFT. This is an **Architect draft** per T-W3-021. It has not been dry-run against
-> a real (even throwaway) tenant yet — that happens in **T-W3-023**. Do not run this against any
-> tenant, Dev or otherwise, until the founder (Architect hat) has signed off and T-W3-023 has
-> passed.
+> **Status:** Founder-approved archive semantics (2026-07-18 W3 design session). This revision
+> **supersedes the T-W3-021 DROP-CASCADE draft**: tenant "deletion" is now an **archive + tag**
+> operation — data is retained, renamed out of the live path, and every side effect is
+> reversible. A true hard purge (dump → verify → drop) is a **future, separate procedure**
+> (see "Future work — hard purge", below) and is explicitly **NOT implemented**.
 >
-> **Severity:** Destructive. Recoverable only within the DR preservation window (Step 7); no
-> rollback after that window closes.
-> **Who performs this:** Founder or Architect only, by hand, until T-W3-022 ships the automated
-> endpoint (which must implement Step 0's three checks in code).
-> **Expected duration:** ~15–20 min of active work, then a standing 7-day (Dev; see Step 7 for the
-> Staging/Prod figure once those accounts exist) DR preservation window before the deletion is
-> final.
-> **Escalation chain:** Architect → Founder → AWS Support (only for a Step 4 rollback attempt)
+> **Severity:** Destructive-lite. The tenant loses live access immediately, but no data is
+> destroyed: the schema is renamed in place, Cognito users are disabled (not deleted), and S3
+> objects are tagged (not removed). Rollback is a bounded, documented procedure (see Rollback
+> semantics).
+> **Who performs this:** A Velnor admin, deliberately, via
+> `DELETE /api/v1/admin/tenants/{slug}` (T-W3-022) — a **synchronous** endpoint, no Step
+> Function, not automated by any scheduler. Until T-W3-022 is deployed, the founder/Architect
+> may perform the manual-run equivalent below by hand.
+> **Expected duration:** ~5–10 min of active work. There is no DR countdown window — archived
+> data is retained until a future hard-purge decision is made and executed separately.
+> **Escalation chain:** Architect → Founder → AWS Support (only for AWS-side API failures)
 
 ---
 
 ## Purpose
 
-Deletes a Velnor tenant end-to-end: drops the tenant's Postgres schema (DEC-0035 rev. 2), expires
-the tenant's S3 document originals (DEC-0047), records an audit confirmation in the shared
-`velnor` schema, and holds a DR preservation window before the deletion is considered final.
+Archives a Velnor tenant end-to-end: marks the registry row `archived`, renames the tenant's
+Postgres schema out of the live namespace (DEC-0035 rev. 2), disables the tenant's Cognito
+users (reversible), tags the tenant's S3 document originals `tenant_archived=true` (DEC-0047),
+and records a `tenant_archived` confirmation in the shared `velnor.audit_event` ledger.
 
 This procedure is the source of truth that **T-W3-022** (`DELETE
-/api/v1/admin/tenants/{slug}`) must automate behind three independent authorization checks, and
-that **T-W3-023** dry-runs against a throwaway Dev tenant before either can move to
-`done_verified`.
+/api/v1/admin/tenants/{slug}` + `POST /api/v1/admin/tenants/{slug}/deletion-preview`)
+automates behind the authorization guards in Step 0, and that **T-W3-023** dry-runs against a
+throwaway Dev tenant before either can move to `done_verified`.
 
-Inputs: 2026-05-17 V1 implementation plan §2.5 Q-6 (step ordering), §2.6 Q-15 (deletion semantics).
+Founder decisions locked in the 2026-07-18 W3 design:
+
+1. Deletion is an **archive + tag** operation, performed deliberately by a Velnor admin — not
+   automated, no Step Function; the endpoint is synchronous.
+2. Schema archive = **rename in place**: `velnor_t_<slug>` → `velnor_arch_<slug>_<yyyymmdd>`
+   (slug normalized `-`→`_` per SDK convention). Data retained.
+3. Users archive = **Cognito `AdminDisableUser`** (reversible), not delete.
+4. MFA freshness = **JWT `auth_time` ≤ 5 min** (the admin pool has MFA=ON, so `auth_time` IS
+   the MFA timestamp). No step-up subsystem.
+5. Audit event type = **`tenant_archived`**.
+6. Idempotency is **state-derived** from `velnor.tenants.state` — no dedupe ledger table.
+
 Anchors: DEC-0035 rev. 2 (schema-per-tenant), DEC-0047 (three-layer tenant document storage),
-DEC-0065 (visibility/RLS — confirms tenant isolation is schema-scoped, not a `tenant_id` column,
-inside the tenant schema), DEC-0050 (audit retention: 90-day hot / 13-month Glacier window), DEC-0046
-(CloudWatch → SNS → SES alert routing, for the escalation paths below).
+DEC-0065 (visibility/RLS — tenant isolation is schema-scoped inside the tenant schema),
+DEC-0050 (audit retention: 90-day hot / 13-month Glacier window), DEC-0046 (CloudWatch → SNS →
+SES alert routing, for the escalation paths below).
 
 ---
 
 ## Scope
 
-- **In scope:** the tenant's schema (`velnor_t_{slug}`); the tenant's S3 objects under
-  `{tenant_id}/` in `velnor-dev-uploads` (DEC-0047 key pattern `{tenant_id}/original/{doc_id}.{ext}`);
-  the tenant's row in the shared registry (`velnor.tenants`); the tenant's pending
-  `action_request` rows; the tenant's Stripe subscription, if any.
+- **In scope:** the tenant's schema (`velnor_t_{slug_normalized}`) — renamed, not dropped; the
+  tenant's Cognito users in the tenant pool (`custom:tenant_id == <slug>`) — disabled, not
+  deleted; the tenant's S3 objects in the uploads bucket — tagged `tenant_archived=true`, not
+  removed; the tenant's row in the shared registry (`velnor.tenants`) — `state` set to
+  `archived`; the tenant's pending `action_request` rows — declined before archive; the
+  tenant's Stripe subscription, if any — cancelled before archive.
 - **Out of scope:** the shared `velnor` schema itself and its other tenants' rows;
   `velnor.golden_template`; Glacier-archived `tool_invocation_log` history for this tenant
-  (retained for the full 13-month DEC-0050 audit window regardless of tenant deletion — see
-  Edge cases).
+  (retained for the full 13-month DEC-0050 audit window regardless of archival — see Edge
+  cases); **any data destruction whatsoever** — dump/verify/drop is the future hard-purge
+  procedure, not this one.
 
 ---
 
-## Step 0 — Authorization: three independent checks
+## Step 0 — Authorization guards (T-W3-022 evaluates these in this exact order)
 
-**T-W3-022 must implement all three of the following in the endpoint before the delete workflow
-is allowed to start.** They are independent — none may substitute for another — and failing any
-one aborts before any destructive action runs.
+**T-W3-022 implements all of the following in the endpoint before any archive action runs.**
+They are independent — none may substitute for another — and failing any one aborts before
+any state changes.
 
-1. **confirm-slug** — the request body must include `"confirm_slug": "<slug>"`, and it must be a
-   byte-exact match to the `{slug}` path parameter. Purpose: stops a wrong-tenant deletion caused
-   by a UI misclick or a copy-pasted slug from a different tab. Reject with `400` on any mismatch,
-   before the idempotency or MFA checks even run.
-2. **Idempotency-Key** — the request must carry an `Idempotency-Key` header (a UUID). The server
-   persists the key (a dedupe row keyed on `(operation, idempotency_key)`) *before* triggering the
-   Step Functions Express workflow (DEC-0039 `modules/safe_workflow/`), so a client retry after a
-   timeout cannot re-invoke the destructive workflow a second time. A re-used key whose workflow is
-   still `RUNNING` gets `409`; a re-used key whose workflow already reached a terminal state
-   returns that same terminal result instead of re-running anything.
-3. **MFA-within-5min** — the caller's session must show a step-up MFA challenge (TOTP or WebAuthn)
-   completed within the last 5 minutes — not merely "logged in with MFA at some point." Check an
-   `mfa_verified_at` session/claim; if it is absent or older than 5 minutes, return `401`/`428`
-   and require re-authentication before the request can be retried.
+1. **Admin JWT** — via the existing admin-auth middleware
+   (`velnor-admin-api/internal/middleware/admin.go`). Absent/invalid → `401` (existing
+   behavior).
+2. **Idempotency-Key** — the request must carry an `Idempotency-Key` header, else `400`
+   `{"error":"missing Idempotency-Key header"}`. The submitted key is recorded in the audit
+   payload for traceability. Replay protection itself is **state-derived**, not key-derived —
+   see "Idempotency" below.
+3. **confirm-slug** — the request body must include `{"confirm_slug": "<slug>"}` and it must
+   equal the `{slug}` path parameter **exactly, case-sensitive**, else `422`. Purpose: stops a
+   wrong-tenant archive caused by a UI misclick or a copy-pasted slug from a different tab.
+4. **MFA freshness** — the JWT `auth_time` claim must be within **300 s** of now, else `401`
+   `{"error":"MFA freshness expired; re-authenticate"}`. The admin pool enforces MFA=ON, so a
+   fresh `auth_time` proves a fresh MFA challenge — no separate step-up subsystem exists or is
+   needed. The middleware parses `auth_time` into the request context; the handler enforces
+   the window so only destructive routes pay it.
 
-**Manual-run equivalent (this runbook, before T-W3-022 ships):** the operator performs all three by
-hand — re-type the slug at the Step 1 confirmation prompt (do not copy-paste it from a ticket, to
-force a second read), treat the run as one-shot (start over from Step 1 rather than repeating a
-single step after an interruption), and confirm an MFA-backed `velnor-dev` SSO login happened
-within the last 5 minutes before Step 4.
+### Idempotency (state-derived)
+
+If `velnor.tenants.state = 'archived'` already, the endpoint returns **200** with the recorded
+archive result, read back from the latest `tenant_archived` audit_event payload for that slug
+— replay-safe within and beyond 24 h, with no dedupe ledger table. Concurrent
+double-invocation is closed by the `UPDATE ... SET state='archived'` check-and-set being the
+**first** execution step: the second request observes `archived` and takes the replay path.
+
+**Manual-run equivalent (this runbook, before T-W3-022 ships):** the operator performs the
+guards by hand — re-type the slug at the Step 1 confirmation prompt (do not copy-paste it from
+a ticket, to force a second read), check `velnor.tenants.state` first and stop if it is
+already `archived`, and confirm an MFA-backed `velnor-dev` SSO login happened within the last
+5 minutes before Step 4.
 
 ### Implementation hazards for T-W3-022 (security review)
 
-These do not block the manual runbook (an operator typing literal values by hand isn't exposed to
-them) but they are real hazards for the automated endpoint and must be closed before T-W3-022
-ships:
-
-- **`slug` must be allow-list validated before it ever reaches DDL.** Step 4's `DROP SCHEMA
-  velnor_t_<slug> CASCADE` and Step 3's `velnor_t_<slug>.action_request` are schema-qualified
-  identifiers — Postgres has no parameterized-identifier form for DDL (unlike a `$1` value
-  placeholder), so if the endpoint builds this statement by string-formatting the path parameter
-  directly, an attacker-controlled `slug` containing `; DROP SCHEMA velnor; --` (or any Postgres
-  identifier-breaking sequence) is a DDL injection vector. **confirm-slug (Step 0.1) checks that
-  the body matches the path parameter — it does not validate that either value is a safe
-  identifier.** T-W3-022 must validate `slug` against the same charset the provisioning path
-  already constrains it to (schema names are derived from `slug` at tenant creation — reuse that
-  validator) *before* Step 0's checks run, and build the DDL via a quoted-identifier helper (e.g.
-  `pgx`'s `pgx.Identifier{...}.Sanitize()` or equivalent), never raw string interpolation.
-- **Concurrent double-invocation isn't covered by the Idempotency-Key check alone.** Two requests
-  for the same tenant with two *different* Idempotency-Keys both pass Step 0 independently and can
-  race into Step 4 concurrently — the dedupe row only stops a retry of the *same* key. T-W3-022
-  should acquire a per-tenant advisory lock (or check-and-set `velnor.tenants.state =
-  'deletion_in_progress'`) as the first action inside the workflow, before Step 2, so a second
-  concurrent request fails fast instead of racing another instance of this same procedure.
-- **No audit trail exists if the workflow crashes between Step 4 and Step 6.** As drafted, the only
-  audit write (`tenant_deleted`) happens *after* the destructive steps — if the process dies
-  between the Step 4 `DROP` and the Step 6 `INSERT`, there is no record in `velnor.audit_event` that
-  a deletion was even attempted. T-W3-022 must write a `tenant_deletion_started` audit_event (same
-  shape as Step 6, `event_type = 'tenant_deletion_started'`) as its first workflow action, before
-  Step 2, so a forensic trail exists regardless of where the workflow stops. DEC-0039's
-  `safe_workflow` bounded retries + DLQ then apply to the remaining steps as usual.
+- **`slug` must be allow-list validated before it ever reaches DDL.** Step 4's
+  `ALTER SCHEMA velnor_t_<slug_normalized> RENAME TO ...` is a schema-qualified identifier —
+  Postgres has no parameterized-identifier form for DDL, so the endpoint must validate `slug`
+  against the provisioning charset (`^[a-z][a-z0-9-]{1,40}$`, reserved-slug deny-list — reuse
+  the provisioning validator in `internal/handlers/tenants.go`) *before* Step 0's checks run,
+  and build the DDL via a quoted-identifier helper (`pgx.Identifier{...}.Sanitize()` or
+  equivalent), never raw string interpolation. confirm-slug only proves body==path — it does
+  not prove either is a safe identifier.
+- **Schema ownership (accepted risk).** `ALTER SCHEMA ... RENAME` requires ownership of the
+  schema. If the admin-api DB role lacks it in Dev, the T-W3-023 dry-run will surface the
+  failure; the fallback is a founder-run grant via the bastion tunnel:
+  `ALTER SCHEMA velnor_t_<slug_normalized> OWNER TO <admin_api_role>;` — then re-issue the
+  archive request (the state-derived idempotency makes the retry safe).
+- **Partial failure is reported, not hidden.** Cognito disables and S3 tagging continue on
+  per-item failure, collect the failures, and report them in both the response and the
+  `partial_failures` array of the audit payload. An operator must re-drive only the failed
+  items (both operations are idempotent) — never re-run the whole procedure blindly.
 
 ---
 
@@ -129,8 +146,12 @@ ships:
 All boxes must be checked before Step 1. If any is unchecked, stop.
 
 - [ ] **Consent obtained** — written confirmation from the tenant (or the Founder, for a
-      ToS/compliance-driven removal) that deletion is authorized. Attach to the task ticket.
-- [ ] **Backups verified** — confirm Aurora's automated backup is current:
+      ToS/compliance-driven removal) that archival is authorized. Attach to the task ticket.
+      Note: because this is an archive, consent to *archive* is NOT consent to *purge* —
+      a future hard purge needs its own consent record.
+- [ ] **Backups verified** — the archive itself destroys nothing, but confirm Aurora's
+      automated backup is current anyway (it is the recovery path if anything unexpected
+      happens mid-procedure):
 
   ```bash
   aws rds describe-db-clusters --region us-east-1 --profile velnor-dev \
@@ -138,20 +159,15 @@ All boxes must be checked before Step 1. If any is unchecked, stop.
     --query 'DBClusters[0].{Retention:BackupRetentionPeriod,LatestRestorableTime:LatestRestorableTime}'
   # expect Retention=7 (Dev, per velnor-iac/accounts/dev/aurora/main.tf) and
   # LatestRestorableTime within the last few minutes.
-  # Staging/Prod are not yet provisioned (Phase 2, Wk 12 per CLAUDE.md) — when they exist,
-  # confirm that account's own retention value before running this against a non-Dev tenant.
   ```
 
-- [ ] **No active workflows on the tenant** — confirm no in-flight Step Functions executions
-      reference this tenant:
-
-  ```bash
-  aws stepfunctions list-executions --region us-east-1 --profile velnor-dev \
-    --state-machine-arn <safe_workflow-state-machine-arn> --status-filter RUNNING \
-    --query "executions[?contains(name, '<slug>')]"
-  # expect: []
-  ```
-
+- [ ] **State checked** — `SELECT state FROM velnor.tenants WHERE slug='<slug>';` — if already
+      `archived`, stop: the archive has already happened (state-derived idempotency; see
+      Step 0). Re-running the manual procedure against an archived tenant is a no-op at best
+      and a double-rename hazard at worst.
+- [ ] **Deletion preview captured** — run the preview (or its manual SQL equivalent, Step 1)
+      and attach the row counts / user count / object count to the ticket. This is the
+      before-picture the post-archive verification compares against.
 - [ ] **Subscription status checked** — see Step 2 / Edge cases: active subscription.
 - [ ] **Pending action_requests checked** — see Step 3 / Edge cases: pending action_requests.
 
@@ -159,8 +175,8 @@ All boxes must be checked before Step 1. If any is unchecked, stop.
 
 ## Ordered procedure
 
-Open the SSM bastion tunnel first — see `runbooks/operations/dev-db-validation.md` §0 for the full
-walkthrough (fetching the master password, `127.0.0.1` vs `localhost`, etc.):
+Open the SSM bastion tunnel first — see `runbooks/operations/dev-db-validation.md` §0 for the
+full walkthrough (fetching the master password, `127.0.0.1` vs `localhost`, etc.):
 
 ```bash
 cd velnor-iac
@@ -168,260 +184,315 @@ cd velnor-iac
 ./scripts/bastion.sh tunnel      # Aurora-direct 5432 -> localhost:5432
 ```
 
-Capture the tenant's identifiers up front — you need both, and `tenant_id` becomes unrecoverable
-from Postgres after Step 4:
+Capture the tenant's identifiers up front — you need both (`tenant_id` keys the S3 prefix and
+the audit payload; the schema name is derived from `slug` with `-`→`_`):
 
 ```sql
 SELECT tenant_id, slug, display_name, plan, state
 FROM velnor.tenants
 WHERE slug = '<slug>';
--- record tenant_id (UUID) — needed for the S3 prefix in Step 5 and the audit
--- payload in Step 6.
+-- record tenant_id (UUID) and confirm state is NOT already 'archived'.
 ```
 
-### Step 1 — Authorization + pre-flight
+### Step 1 — Authorization + pre-flight + preview
 
-Complete Step 0 and the full pre-flight checklist above. **Abort point:** nothing has changed yet;
-stopping here is a no-op.
+Complete Step 0's guards and the full pre-flight checklist above. Capture the deletion
+preview — via the endpoint once T-W3-022 is deployed:
+
+```bash
+curl -s -X POST "$ADMIN_API_BASE_URL/api/v1/admin/tenants/<slug>/deletion-preview" \
+  -H "Authorization: Bearer $ADMIN_JWT"
+# 200 {slug, row_counts:{<table>:n,...}, s3_object_count, user_count}
+# 404 if tenant unknown; 409 if already archived.
+```
+
+or manually (per-table counts for the tenant schema):
+
+```sql
+SELECT table_name FROM information_schema.tables
+WHERE table_schema = 'velnor_t_<slug_normalized>';
+-- then, for each: SELECT count(*) FROM velnor_t_<slug_normalized>.<table>;
+```
+
+**Abort point:** nothing has changed yet; stopping here is a no-op.
 
 ### Step 2 — Cancel the Stripe subscription (if active)
 
-> **Known gap — flag for T-W3-022:** `velnor.tenants` has no `stripe_subscription_id` column
-> (`velnor-schemas/postgres/velnor_shared/v0.sql:13-21`), and the only subscription store in the
-> codebase today is an **in-memory stub**
-> (`velnor-workers/internal/stripe/handlers/subscription.go` —
-> `InMemoryMembershipStore`, explicitly commented "replace with a database-backed implementation
-> before production use"). There is no durable, queryable tenant→subscription mapping yet. The
-> Stripe webhook handler keys subscriptions by `metadata["tenant_id"]` on the Stripe object, so
-> that is the only reliable lookup path today.
+> **Known gap (unchanged from the T-W3-021 draft):** `velnor.tenants` has no
+> `stripe_subscription_id` column and the only subscription store is an in-memory stub
+> (`velnor-workers/internal/stripe/handlers/subscription.go`). The Stripe webhook handler keys
+> subscriptions by `metadata["tenant_id"]`, so that is the only reliable lookup path today.
 
-1. In the Stripe Dashboard, search Customers/Subscriptions by metadata `tenant_id = <tenant_id
-   from above>`.
-2. If an active subscription exists, cancel it immediately (Subscription → Cancel immediately, not
-   at period end — a deleted tenant should not continue to bill).
-3. Confirm the cancellation webhook landed:
+1. In the Stripe Dashboard, search Customers/Subscriptions by metadata
+   `tenant_id = <tenant_id from above>`.
+2. If an active subscription exists, cancel it immediately — an archived tenant must not
+   continue to bill.
+3. Confirm the cancellation webhook landed (event lands in the shared ledger keyed by
+   `tenant_id`):
 
    ```sql
-   SELECT * FROM velnor.audit_event
-   WHERE tenant_slug = '<slug>' AND event_type = 'subscription_cancelled'
+   SELECT event_type, created_at FROM velnor.audit_event
+   WHERE tenant_id = '<tenant_id>' AND event_type = 'subscription_cancelled'
    ORDER BY created_at DESC LIMIT 1;
    -- expect one row, created within the last few minutes
    ```
 
-**Abort point:** if no active subscription is found, or cancellation is confirmed, continue. If
-cancellation fails or the webhook doesn't land within a few minutes, stop and escalate to the
-Architect — do not proceed to Step 4 with a live subscription still billing a schema that's about
-to be dropped.
+**Abort point:** if no active subscription is found, or cancellation is confirmed, continue.
+If cancellation fails or the webhook doesn't land within a few minutes, stop and escalate to
+the Architect — do not archive a tenant whose subscription is still live.
 
 ### Step 3 — Decline pending action_requests
 
 ```sql
 -- inspect what's pending in the tenant's own schema
-SELECT id, state, payload FROM velnor_t_<slug>.action_request
+SELECT id, state, payload FROM velnor_t_<slug_normalized>.action_request
 WHERE state IN ('proposed', 'pending')
 ORDER BY id;
 
--- decline them all. There is no dedicated "reason" column on action_request
--- (velnor-action-gate/migrations/001_action_request.sql:9-49) — record the
--- reason inside payload instead.
-UPDATE velnor_t_<slug>.action_request
+-- decline them all; record the reason inside payload (no dedicated reason column —
+-- velnor-action-gate/migrations/001_action_request.sql)
+UPDATE velnor_t_<slug_normalized>.action_request
 SET state = 'declined',
-    payload = payload || jsonb_build_object('decline_reason', 'tenant_deleted', 'declined_at', now())
+    payload = payload || jsonb_build_object('decline_reason', 'tenant_archived', 'declined_at', now())
 WHERE state IN ('proposed', 'pending');
 ```
 
-**Abort point:** if any `action_request` is in `confirmed` state (mid-execution, not merely
-proposed/pending), **stop** — a write is in flight against this tenant's data. Wait for it to reach
-a terminal state (`completed` / `failed` / `expired`) before continuing; do not force-decline a
-`confirmed` request.
+**Abort point:** if any `action_request` is in `confirmed` state (mid-execution), **stop** — a
+write is in flight against this tenant's data. Wait for it to reach a terminal state
+(`completed` / `failed` / `expired`) before continuing; do not force-decline a `confirmed`
+request.
 
-### Step 4 — Schema DROP CASCADE
+### Step 4 — Mark archived + rename the schema in place
 
-This is the point of no return for live query access to this tenant's data. From here, the only
-path back is an Aurora point-in-time restore, and only within the DR preservation window (Step 7 /
-Rollback table below).
+This is the moment the tenant loses live access. It is **reversible** (see Rollback
+semantics) — the schema and all its data survive under the archive name.
 
 ```sql
--- last look before dropping — confirm this is the schema you mean to drop
-SELECT schema_name FROM information_schema.schemata WHERE schema_name = 'velnor_t_<slug>';
+-- 4a. Check-and-set the registry row FIRST (this is the idempotency anchor —
+--     T-W3-022 does exactly this as its first execution step)
+UPDATE velnor.tenants
+SET state = 'archived', updated_at = now()
+WHERE slug = '<slug>' AND state <> 'archived';
+-- expect: UPDATE 1. If UPDATE 0, the tenant is already archived — STOP and
+-- take the replay path (read the recorded result back from the latest
+-- tenant_archived audit_event; do not re-run Steps 4b–6).
 
--- the drop. velnor_t_<slug> holds: entity_row, entity_edge, entity_embedding,
--- entity_doc, action_request, conversation_turn, audit_event, agent_run
--- (DEC-0035 rev. 2) — CASCADE removes all of them together with the schema.
-DROP SCHEMA velnor_t_<slug> CASCADE;
+-- 4b. Last look before renaming — confirm this is the schema you mean to archive
+SELECT schema_name FROM information_schema.schemata
+WHERE schema_name = 'velnor_t_<slug_normalized>';
+
+-- 4c. Rename in place. Nothing is dropped; every table
+--     (entity_doc, entity_embedding, action_request, conversation_turn, ...)
+--     moves with the schema.
+ALTER SCHEMA velnor_t_<slug_normalized> RENAME TO velnor_arch_<slug_normalized>_<yyyymmdd>;
+-- <yyyymmdd> = today's UTC date, e.g. velnor_arch_test_delete_me_20260718
 ```
 
-**Record the exact timestamp this ran.** It is the anchor for the DR preservation window in Step 7
-and goes into the audit payload in Step 6.
+**Record the exact timestamp and the full archive schema name** — both go into the audit
+payload in Step 6, and the archive name is what a rollback renames back.
 
-### Step 5 — S3 object expiration
+> **If 4c fails with "must be owner of schema":** the admin-api DB role (or your operator
+> role) does not own the schema. Founder-run fallback via the tunnel:
+> `ALTER SCHEMA velnor_t_<slug_normalized> OWNER TO <role>;` then re-run 4c. This is the
+> accepted DB-permission risk from the W3 design; the dry-run surfaces it if present.
 
-`velnor-dev-uploads` holds this tenant's document originals under `{tenant_id}/original/{doc_id}.{ext}`
-(DEC-0047; bucket defined at `velnor-iac/accounts/dev/ecs/embed-worker/uploads_bucket.tf:74-75`).
-The bucket has **versioning enabled** and, as of this writing, **no lifecycle rule** — so a plain
-`aws s3 rm` only adds a delete marker; prior object versions remain in the bucket (and billed,
-and technically recoverable) until explicitly purged.
+### Step 5 — Disable Cognito users + tag S3 objects
+
+Both operations are reversible and idempotent. Partial failure: continue, collect, report —
+then re-drive only the failed items.
 
 ```bash
-# 1. Confirm what's under the prefix before touching anything
-aws s3 ls "s3://velnor-dev-uploads/<tenant_id>/" --recursive --profile velnor-dev
+# 5a. Disable every tenant user in the tenant pool (filter client-side on
+#     custom:tenant_id — Cognito server-side filters can't target custom attrs)
+aws cognito-idp list-users --profile velnor-dev --region us-east-1 \
+  --user-pool-id "$COGNITO_TENANT_POOL_ID" \
+  --query 'Users[].{u:Username,attrs:Attributes}' --output json \
+  | jq -r '.[] | select(.attrs[]? | select(.Name=="custom:tenant_id" and .Value=="<slug>")) | .u' \
+  | while read -r u; do
+      aws cognito-idp admin-disable-user --profile velnor-dev --region us-east-1 \
+        --user-pool-id "$COGNITO_TENANT_POOL_ID" --username "$u"
+    done
+# AdminDisableUser, NOT AdminDeleteUser — disabled users are re-enable-able.
 
-# 2. Add delete markers on current versions (recoverable up to this point —
-#    see Rollback table)
-aws s3 rm "s3://velnor-dev-uploads/<tenant_id>/" --recursive --profile velnor-dev
-
-# 3. Capture every version + delete-marker under the prefix before purging —
-#    this listing IS the only record of what existed; save it somewhere
-#    durable (not just /tmp) if there is any chance Step 4's rollback path
-#    will be exercised.
-aws s3api list-object-versions --bucket velnor-dev-uploads --prefix "<tenant_id>/" \
-  --profile velnor-dev --region us-east-1 \
-  --query '{Objects: Versions[].{Key:Key,VersionId:VersionId}}' --output json \
-  > /tmp/<tenant_id>-versions.json
-
-aws s3api list-object-versions --bucket velnor-dev-uploads --prefix "<tenant_id>/" \
-  --profile velnor-dev --region us-east-1 \
-  --query '{Objects: DeleteMarkers[].{Key:Key,VersionId:VersionId}}' --output json \
-  > /tmp/<tenant_id>-markers.json
-
-# 4. Purge all object versions AND delete markers under the prefix — this is
-#    the irreversible step (required for real erasure, since the bucket has
-#    versioning enabled).
-aws s3api delete-objects --bucket velnor-dev-uploads --profile velnor-dev --region us-east-1 \
-  --delete file:///tmp/<tenant_id>-versions.json
-aws s3api delete-objects --bucket velnor-dev-uploads --profile velnor-dev --region us-east-1 \
-  --delete file:///tmp/<tenant_id>-markers.json
-
-# 5. Verify empty
-aws s3 ls "s3://velnor-dev-uploads/<tenant_id>/" --recursive --profile velnor-dev
-# expect: no output
+# 5b. Tag every object under the tenant's uploads prefix (objects are NOT
+#     deleted, NOT lifecycle-expired — tagged only)
+aws s3api list-objects-v2 --profile velnor-dev --region us-east-1 \
+  --bucket "$UPLOADS_BUCKET" --prefix "<tenant_prefix>/" \
+  --query 'Contents[].Key' --output json | jq -r '.[]' \
+  | while read -r key; do
+      aws s3api put-object-tagging --profile velnor-dev --region us-east-1 \
+        --bucket "$UPLOADS_BUCKET" --key "$key" \
+        --tagging 'TagSet=[{Key=tenant_archived,Value=true}]'
+    done
+# <tenant_prefix>: DEC-0047 key pattern is {tenant_id}/original/{doc_id}.{ext} —
+# use the tenant_id captured up front. (T-W3-022 lists the tenant prefix in the
+# uploads bucket the same way; verify the deployed prefix convention during the
+# T-W3-023 dry-run and correct this line if it differs.)
 ```
 
-> **Build note for T-W3-022:** DEC-0047's declared lifecycle (STANDARD → STANDARD-IA at 90d →
-> GLACIER at 365d, cross-region replica in `us-west-2`) is **not implemented** in `velnor-iac` for
-> `velnor-dev-uploads` today — only SSE-KMS + versioning exist. Until a per-prefix
-> lifecycle/expiration rule exists, the automated endpoint must do the explicit
-> list-then-delete-versions sequence above (steps 3–4), scoped to the tenant's own prefix only —
-> never a bucket-wide operation.
+**Count what you touched** — `users_disabled` and `s3_objects_tagged` go into the Step 6
+audit payload and the endpoint response, and the post-archive verification re-checks them.
 
-### Step 6 — Audit confirmation
+### Step 6 — Audit confirmation (`tenant_archived`)
 
-Write the deletion confirmation into the shared `velnor.audit_event` table — this table lives in
-`velnor`, not `velnor_t_<slug>`, so it survives the Step 4 drop
-(`velnor-admin-api/migrations/001_audit_event.sql:13-21`):
+Write the archive confirmation into the shared `velnor.audit_event` ledger — this table lives
+in `velnor`, not the tenant schema, so it is unaffected by the rename. Real column set is
+`(id, tenant_id, event_type, actor_id, payload, created_at)` — there is **no** `tenant_slug`
+or `actor_email` column (DEC-0068; the T-W3-021 draft's INSERT targeted columns that never
+existed — corrected here):
 
 ```sql
-INSERT INTO velnor.audit_event (id, tenant_slug, actor_email, event_type, payload, created_at)
+INSERT INTO velnor.audit_event (tenant_id, event_type, actor_id, payload)
 VALUES (
-  gen_random_uuid(),
-  '<slug>',
-  '<sha256:hex-token-of-operator-email>',
-  'tenant_deleted',
+  '<tenant_id>',
+  'tenant_archived',
+  '<sha256:hex-token-of-operator-identity>',   -- never a literal email
   jsonb_build_object(
-    'tenant_id', '<tenant_id>',
-    'schema_dropped_at', '<Step-4-timestamp>',
-    's3_prefix_purged', true,
-    'dr_preservation_window_ends', '<Step-4-timestamp + backup retention days>'
-  ),
-  now()
+    'slug', '<slug>',
+    'schema_renamed_to', 'velnor_arch_<slug_normalized>_<yyyymmdd>',
+    'users_disabled', <n>,
+    's3_objects_tagged', <n>,
+    'idempotency_key', '<the-submitted-key>',
+    'performed_by', '<sha256:hex-token-of-operator-identity>',
+    'partial_failures', '[]'::jsonb
+  )
 );
 ```
 
-Then mark the registry row (`velnor.tenants` has no `deleted_at` column — reuse the existing
-`state` column, which already carries free-text values like `'active'`):
+T-W3-022 writes this via the existing `internal/audit` writer, and its 200 response mirrors
+the payload: `{slug, state:"archived", schema_renamed_to, users_disabled, s3_objects_tagged,
+archived_at}`. This audit row is also the **replay source**: a repeat DELETE for an
+already-archived tenant returns this recorded result.
 
-```sql
-UPDATE velnor.tenants SET state = 'deleted', updated_at = now() WHERE slug = '<slug>';
-```
+### Step 7 — Retention posture (no countdown)
 
-### Step 7 — DR preservation window
-
-The tenant's schema is still recoverable via Aurora point-in-time restore for as long as the
-automated backup retains it: **7 days in Dev**
-(`backup_retention_period = 7`, `velnor-iac/accounts/dev/aurora/main.tf:233`). Staging and Prod are
-not yet provisioned (Phase 2, Wk 12 per CLAUDE.md) — confirm that account's own
-`backup_retention_period` before treating this figure as authoritative there.
-
-Do not consider the deletion final, and do not let a new tenant reuse this slug, until this window
-has elapsed:
-
-```bash
-# compute the close-out date (Dev, 7-day window)
-date -v+7d -j -f "%Y-%m-%d" "<Step-4-date>" "+%Y-%m-%d"   # macOS
-# date -d "<Step-4-date> +7 days" +%Y-%m-%d               # GNU/Linux
-```
-
-No action is required at close-out — the automated backup simply ages out. This step exists so an
-operator asking "can this still be undone?" has a definitive, dated answer, not so a follow-up
-task needs to be scheduled.
+There is **no DR preservation window and no close-out date**: nothing was destroyed, so
+nothing ages out. The archived schema, disabled users, and tagged objects persist
+indefinitely — at storage cost — until the founder explicitly decides to hard-purge (future
+procedure, below) or to restore. Do not let a new tenant reuse this slug while the archive
+exists: the registry row (state `archived`) still holds the slug's uniqueness, and the archive
+schema still embeds it.
 
 ---
 
 ## Rollback semantics
 
+Rollback is a first-class outcome of archive semantics — every step has a cheap inverse.
+
 | After step | Rollback path | Cost / caveat |
 |---|---|---|
-| Step 1 (authorization + pre-flight) | Stop. Nothing has changed. | None. |
+| Step 1 (authorization + pre-flight + preview) | Stop. Nothing has changed. | None. |
 | Step 2 (Stripe cancel) | Re-subscribe the tenant via the Stripe Dashboard; no data was lost. | Billing gap during the interval; notify the tenant. |
-| Step 3 (decline action_requests) | Manually re-derive and re-submit the declined requests — the underlying entity data still exists (schema not yet dropped at this point). | `declined` state is not itself auto-restorable; someone has to redo the work. |
-| Step 4 (schema DROP CASCADE) | **Aurora point-in-time restore only, and only within the Step 7 window.** Restore the cluster to a new instance at a timestamp just before the DROP ran, `pg_dump --schema=velnor_t_<slug>` from the restored instance, then `pg_restore` into the live cluster. | Expensive (new RDS instance, manual extraction), requires Architect + Founder sign-off to execute, and does **not** resurrect anything already purged in Step 5 — Aurora backups and S3 are independent recovery domains. |
-| Step 5, item 2 (`aws s3 rm` — delete markers added) | Still recoverable: `aws s3api delete-object --key <key> --version-id <delete-marker-version-id>` removes the marker and un-hides the prior version. | Cheap, but only until item 4 runs. |
-| Step 5, item 4 (`delete-objects` — versions purged) | **No rollback.** `delete-objects` on explicit version IDs is permanent — S3 does not retain a version once its version ID is deleted. | Irreversible. |
-| Step 6 (audit confirmation) | N/A — this step is additive, not destructive. Never delete or edit a `tenant_deleted` audit_event row, even if the deletion is later reversed via Step 4's path — append a `tenant_deletion_reversed` event instead. | None. |
-| Step 7 (DR window closes) | **No rollback.** This is the actual point of no return — after this, Step 4's restore path is gone too. | — |
+| Step 3 (decline action_requests) | Manually re-derive and re-submit the declined requests — the underlying entity data still exists. | `declined` state is not itself auto-restorable; someone has to redo the work. |
+| Step 4 (state + schema rename) | `ALTER SCHEMA velnor_arch_<slug_normalized>_<yyyymmdd> RENAME TO velnor_t_<slug_normalized>;` then `UPDATE velnor.tenants SET state='active', updated_at=now() WHERE slug='<slug>';` | Cheap. Do it in this order (schema first, then state) so a half-rolled-back tenant never presents as active without its schema. |
+| Step 5a (Cognito disable) | `aws cognito-idp admin-enable-user` for each disabled user. | Cheap; users' credentials and attributes were never touched. |
+| Step 5b (S3 tagging) | Remove or overwrite the tag: `put-object-tagging` with an empty/changed TagSet. | Cheap; object bytes were never touched. |
+| Step 6 (audit confirmation) | N/A — additive, not destructive. Never delete or edit a `tenant_archived` audit_event row, even after a rollback — append a `tenant_unarchived` event instead, so the ledger tells the whole story. | None. |
+| Step 7 (retention posture) | N/A — nothing to roll back; no window ever closes. Full rollback of an archived tenant remains possible indefinitely, until a future hard purge (which will have its own point of no return). | — |
 
 ---
 
-## Post-deletion verification (no orphan rows in shared schema)
+## Post-archive verification (schema renamed, no active orphans)
 
 ```sql
--- 1. Tenant schema is gone
-SELECT schema_name FROM information_schema.schemata WHERE schema_name = 'velnor_t_<slug>';
+-- 1. Live schema name is gone, archive schema name exists
+SELECT schema_name FROM information_schema.schemata
+WHERE schema_name = 'velnor_t_<slug_normalized>';
 -- expect: 0 rows
-
--- 2. Registry row is marked deleted, not silently vanished
-SELECT slug, state, updated_at FROM velnor.tenants WHERE slug = '<slug>';
--- expect: 1 row, state = 'deleted'
-
--- 3. Audit confirmation exists
-SELECT event_type, payload, created_at FROM velnor.audit_event
-WHERE tenant_slug = '<slug>' AND event_type = 'tenant_deleted'
-ORDER BY created_at DESC LIMIT 1;
+SELECT schema_name FROM information_schema.schemata
+WHERE schema_name LIKE 'velnor_arch_<slug_normalized>_%';
 -- expect: 1 row
 
--- 4. tool_invocation_log history still resolves — historical rows for this
---    tenant are EXPECTED to remain (retained for the DEC-0050 13-month audit
---    window); this check confirms they exist and are attributable, not that
---    they were deleted. Do NOT treat these as orphans.
+-- 2. Registry row is marked archived, not silently vanished
+SELECT slug, state, updated_at FROM velnor.tenants WHERE slug = '<slug>';
+-- expect: 1 row, state = 'archived'
+
+-- 3. Audit confirmation exists (keyed by tenant_id; slug lives in the payload)
+SELECT event_type, payload, created_at FROM velnor.audit_event
+WHERE event_type = 'tenant_archived' AND payload->>'slug' = '<slug>'
+ORDER BY created_at DESC LIMIT 1;
+-- expect: 1 row; payload.partial_failures should be [] — if not, re-drive the
+-- failed items from Step 5 and verify again.
+
+-- 4. No active orphan rows in the shared schema — nothing still references the
+--    tenant as if it were live. tool_invocation_log history is EXPECTED to
+--    remain (DEC-0050 13-month audit window); retained history is not an orphan.
+SELECT count(*) FROM velnor.tenants WHERE slug = '<slug>' AND state <> 'archived';
+-- expect: 0
 SELECT count(*) FROM velnor.tool_invocation_log WHERE tenant_slug = '<slug>';
--- expect: > 0 if the tenant had any tool activity — retained by design, not an orphan
+-- expect: >= 0 — retained by design, attributable, not an orphan. Do NOT delete.
 ```
 
 ```bash
-# 5. S3 prefix is empty
-aws s3 ls "s3://velnor-dev-uploads/<tenant_id>/" --recursive --profile velnor-dev
-# expect: no output
+# 5. Cognito users all disabled (Enabled=false for every custom:tenant_id match)
+aws cognito-idp list-users --profile velnor-dev --region us-east-1 \
+  --user-pool-id "$COGNITO_TENANT_POOL_ID" \
+  --query 'Users[].{u:Username,enabled:Enabled,attrs:Attributes}' --output json \
+  | jq '[.[] | select(.attrs[]? | select(.Name=="custom:tenant_id" and .Value=="<slug>")) | .enabled] | all(. == false)'
+# expect: true
+
+# 6. S3 objects all carry the archive tag (spot-check each key from Step 5b)
+aws s3api get-object-tagging --profile velnor-dev --region us-east-1 \
+  --bucket "$UPLOADS_BUCKET" --key "<one-of-the-keys>" \
+  --query "TagSet[?Key=='tenant_archived'].Value"
+# expect: ["true"]
 ```
 
-**Pass criteria:** schema absent; registry row present with `state = 'deleted'`; exactly one
-`tenant_deleted` audit_event; S3 prefix empty. If any check fails, stop and escalate — do not mark
-the deletion task complete.
+**Pass criteria:** live schema absent + archive schema present; registry row present with
+`state = 'archived'`; exactly one fresh `tenant_archived` audit_event with empty
+`partial_failures`; every tenant user disabled; every tenant object tagged; no shared-table
+row presenting the tenant as active. If any check fails, stop and escalate — do not mark the
+archival task complete.
 
 ---
 
 ## Edge cases
 
-- **Active subscription** (Step 2) — must be cancelled before Step 4. No durable DB record of the
-  tenant's Stripe subscription exists yet (see Known gap in Step 2); T-W3-022 should either add a
-  queryable subscription reference or perform the metadata-filtered Stripe API lookup
+- **Active subscription** (Step 2) — must be cancelled before Step 4. No durable DB record of
+  the tenant's Stripe subscription exists yet (see Known gap in Step 2); follow-up work should
+  add a queryable subscription reference or perform the metadata-filtered Stripe API lookup
   programmatically.
 - **Pending action_requests** (Step 3) — anything `proposed`/`pending` is auto-declined with
-  `decline_reason: tenant_deleted` recorded in its `payload`. Anything `confirmed` (mid-execution)
-  blocks Step 4 until it reaches a terminal state.
-- **Glacier-archived audit data** — `tool_invocation_log` rows archived to S3 Glacier are retained
-  for the full 13-month admin audit window (DEC-0050) **regardless of tenant deletion**. This
-  procedure never touches Glacier-archived audit history — see Post-deletion verification, item 4.
-  Do not interpret retained audit history as an incomplete deletion.
+  `decline_reason: tenant_archived` recorded in its `payload`. Anything `confirmed`
+  (mid-execution) blocks Step 4 until it reaches a terminal state.
+- **Repeat archive request** — state-derived idempotency (Step 0): a second DELETE for an
+  already-archived tenant returns 200 with the recorded result from the latest
+  `tenant_archived` audit_event. It does not re-rename, re-disable, or re-tag anything.
+- **Partial failures in Step 5** — recorded in the audit payload's `partial_failures` array
+  and the endpoint response. Re-drive only the failed items (both operations are idempotent),
+  then re-run the post-archive verification.
+- **Glacier-archived audit data** — `tool_invocation_log` rows archived to S3 Glacier are
+  retained for the full 13-month admin audit window (DEC-0050) **regardless of tenant
+  archival**. Do not interpret retained audit history as an incomplete archival.
+- **Slug reuse** — blocked while the archive exists: the `velnor.tenants` row keeps the slug
+  (UNIQUE) in state `archived`. Freeing a slug requires the future hard purge.
+
+---
+
+## Future work — hard purge (dump → verify → drop) — NOT IMPLEMENTED
+
+A true, irreversible purge of an **already-archived** tenant is a separate future runbook and
+endpoint. It is deliberately **not implemented** in T-W3-022 and must never be improvised from
+this document. Its shape, recorded here so the archive design is legible:
+
+1. **Pre-conditions:** tenant already `archived` via this procedure; a fresh, explicit purge
+   consent record (archive consent does not carry over); founder sign-off; a verified Aurora
+   backup checkpoint.
+2. **Dump:** `pg_dump --schema=velnor_arch_<slug_normalized>_<yyyymmdd>` to durable, encrypted
+   off-cluster storage; capture the S3 object-version listing for the tenant prefix.
+3. **Verify:** restore the dump into a scratch database and reconcile row counts per table
+   against the live archive schema; verify the S3 listing is complete. The purge does not
+   proceed until the backup verification passes.
+4. **Drop:** `DROP SCHEMA velnor_arch_<slug_normalized>_<yyyymmdd> CASCADE`; delete S3 object
+   versions + delete markers under the tenant prefix (the bucket is versioned — a plain
+   delete only adds markers); `AdminDeleteUser` the disabled users; append a `tenant_purged`
+   audit_event. This step is the point of no return.
+5. **Retention interlock:** Glacier-archived `tool_invocation_log` history is still retained
+   through the DEC-0050 window even after a purge.
+
+Open items the future purge design must resolve: no S3 lifecycle rule exists on the uploads
+bucket today; there is no durable Stripe subscription reference; the purge must define its own
+DR preservation window before the drop is final.
 
 ---
 
@@ -429,22 +500,23 @@ the deletion task complete.
 
 | Role | When to page | Escalation order |
 |---|---|---|
-| Architect | Any ambiguity in the Step 0 authorization checks, or an abort-point condition (Steps 2–3) is hit | 1st |
-| Founder | A consent question, a Stripe cancellation dispute, or a Step 4/5 rollback is being considered | 2nd |
-| AWS Support | An Aurora PITR restore attempt (Step 4 rollback) is failing on the RDS side | 3rd |
+| Architect | Any ambiguity in the Step 0 guards, an abort-point condition (Steps 2–3), or a Step 4 ownership failure | 1st |
+| Founder | A consent question, a Stripe cancellation dispute, a rollback decision, or anything touching the future hard purge | 2nd |
+| AWS Support | Cognito/S3 API failures that survive retries during Step 5 | 3rd |
 
 ---
 
 ## Sign-off
 
-This runbook is an **Architect draft** (T-W3-021). It gates:
+This runbook reflects the **founder-approved archive semantics** (2026-07-18 W3 design
+session), which supersede the T-W3-021 DROP-CASCADE draft. It gates:
 
-- **T-W3-022** — `DELETE /api/v1/admin/tenants/{slug}`, automating Step 0 (three independent
-  checks) plus Steps 1–7 as a Step Functions Express workflow (DEC-0039 `safe_workflow` module).
-- **T-W3-023** — Engineering dry-run of this exact procedure against a throwaway Dev tenant.
+- **T-W3-022** — `DELETE /api/v1/admin/tenants/{slug}` + deletion-preview, automating Step 0's
+  guards and Steps 4–6 as a synchronous handler (no Step Function).
+- **T-W3-023** — Engineering dry-run of this exact procedure against a throwaway Dev tenant
+  (`velnor-evals/integration/tenant_deletion_dryrun.py`). Revision notes from the dry-run are
+  appended below.
 
-**Founder Architect sign-off is required** before T-W3-021 moves from `done` to `done_verified`.
-The sign-off note should confirm: the Step 0 authorization model is correct and sufficient; the
-Rollback semantics table is acceptable risk; and the two flagged gaps (no durable Stripe
-subscription reference, no S3 lifecycle rule on `velnor-dev-uploads`) are tracked as follow-up
-work rather than blockers to drafting T-W3-022.
+### Dry-run revision notes (T-W3-023)
+
+> (appended by the dry-run task as discoveries land — empty until the dry-run executes)
