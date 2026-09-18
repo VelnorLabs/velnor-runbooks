@@ -65,7 +65,7 @@ The `velnor-admin` account is created on first boot from Secrets Manager. It is
 a **bootstrap credential, not a personal login**.
 
 ```bash
-MLFLOW=http://localhost:5050
+MLFLOW=http://localhost:${MLFLOW_LOCAL_PORT:-5050}
 ADMIN_PW=$(aws secretsmanager get-secret-value \
   --secret-id velnor/dev/mlflow/admin-password \
   --query SecretString --output text --profile velnor-dev --region us-east-1)
@@ -101,10 +101,15 @@ One account per person. Passwords are generated locally and never committed.
 umask 077; OUT=~/mlflow-creds.txt; : > "$OUT"
 for u in <username1> <username2>; do
   PW=$(openssl rand -base64 18)
-  curl -sS -u "velnor-admin:$ADMIN_PW" -X POST "$MLFLOW/api/2.0/mlflow/users/create" \
+  CODE=$(curl -sS -u "velnor-admin:$ADMIN_PW" -X POST "$MLFLOW/api/2.0/mlflow/users/create" \
     -H 'Content-Type: application/json' \
-    -d "{\"username\":\"$u\",\"password\":\"$PW\"}" -w " <- create $u [%{http_code}]\n"
-  printf '%s\t%s\n' "$u" "$PW" >> "$OUT"
+    -d "{\"username\":\"$u\",\"password\":\"$PW\"}" -o /dev/null -w '%{http_code}')
+  if [ "$CODE" = "200" ]; then
+    printf '%s\t%s\n' "$u" "$PW" >> "$OUT"
+    echo "created $u"
+  else
+    echo "FAILED $u [$CODE] - not written to $OUT" >&2
+  fi
 done
 ```
 
@@ -144,23 +149,52 @@ endpoints above which are v2. MLflow 3.x replaced the older
 `experiments/permissions/*` endpoints with a unified per-user grant API; those
 older paths do **not** exist in this version and will 404.
 
+> Verified against the image this service runs
+> (`ghcr.io/mlflow/mlflow:v3.16.0@sha256:470607da…`), because this reads as a
+> typo and has been challenged in review:
+> `mlflow/server/auth/routes.py` defines `GRANT_USER_PERMISSION =
+> _get_rest_path("/mlflow/users/permissions/grant", version=3)`, and
+> `_get_rest_path` builds `f"/api/{version}.0{base_path}"` — so the path is
+> literally `/api/3.0/mlflow/users/permissions/grant`. A grep for
+> `experiments/permissions` across the whole `auth` package returns **zero**
+> matches. Do not "correct" these to `/api/2.0/mlflow/experiments/permissions/*`;
+> that surface does not exist in 3.x.
+
 ```bash
 curl -sS -u "velnor-admin:$ADMIN_PW" -X POST \
   "$MLFLOW/api/3.0/mlflow/users/permissions/grant" \
   -H 'Content-Type: application/json' \
-  -d '{"username":"<username>","permission":"EDIT"}' \
+  -d '{"username":"<username>","resource_type":"experiment",
+       "resource_id":"<experiment-id>","permission":"EDIT"}' \
   -w " [%{http_code}]\n"
 ```
 
+**All four fields are required.** Omitting one returns `400 Missing value for
+required parameter '<name>'` — a self-describing error, not a 404. A grant is
+always *on a specific resource*; there is no username-plus-permission form.
+
 Permission values are `READ`, `EDIT`, `MANAGE`, `NO_PERMISSIONS`.
+
+`resource_type` must be one of `experiment`, `registered_model`, `scorer`,
+`gateway_secret`, `gateway_endpoint`, `gateway_model_definition`, `mcp_server`.
+**`workspace` is rejected here** with a `400` pointing at
+`set_workspace_permission` — workspace-wide grants are a separate surface, so
+this endpoint cannot be used for a blanket grant even by accident.
 
 Check what a user's effective permission actually resolves to — this evaluates
 it the same way a real request would, rather than reporting what was granted:
 
 ```bash
 curl -sS -u "velnor-admin:$ADMIN_PW" \
-  "$MLFLOW/api/3.0/mlflow/users/permissions/get?username=<username>"
+  "$MLFLOW/api/3.0/mlflow/users/permissions/get?username=<username>\
+&resource_type=experiment&resource_id=<experiment-id>"
 ```
+
+Returns `{"allowed":<bool>,"permission":"<NAME>"}`. `allowed` mirrors `can_use`
+(the regular access tier), so `READ` alone does not satisfy it — inspect
+`permission` directly if you need a finer cut. An unknown experiment id returns
+`allowed=false` rather than an error, matching the deny-by-default behaviour of
+the real authorization check.
 
 > Grants write to the user's synthetic `__user_<id>__` role in the active
 > workspace. MLflow 3.x also ships a full RBAC role system
@@ -185,8 +219,9 @@ Each line should show the expected `is_admin` value. A `404` means the create
 did not land.
 
 List every account, which is the reliable way to spot one nobody is tracking.
-User ids are sequential, so a gap may mean a deleted account or simply a
-rolled-back insert — the list tells you which:
+User ids are sequential and a deleted account leaves a gap, but the list shows
+only survivors, so a gap on its own cannot tell you whether an account was
+deleted or never committed. Treat it as a prompt to check, not an answer:
 
 ```bash
 curl -sS -u "velnor-admin:$ADMIN_PW" "$MLFLOW/api/2.0/mlflow/users/list"
@@ -194,8 +229,12 @@ curl -sS -u "velnor-admin:$ADMIN_PW" "$MLFLOW/api/2.0/mlflow/users/list"
 
 > Do **not** try to infer whether a route or an account exists from an HTTP
 > status code here. MLflow's auth middleware rejects before routing, so every
-> path — real, mistyped, or invented — returns `401` when unauthenticated. Only
-> an authenticated call distinguishes them.
+> *authenticated* path — real, mistyped, or invented — returns `401` when called
+> without credentials. Only an authenticated call distinguishes them.
+>
+> The one exception is `/health`, which is unauthenticated by design and answers
+> `200` (see the last note). A `200` from `/health` therefore says nothing about
+> whether basic-auth is enabled.
 
 ## Step 5: Password changes
 
@@ -208,10 +247,16 @@ curl -sS -u "<username>:<their-current-password>" -X PATCH \
   -d '{"username":"<username>","password":"<new-password>"}' -w " [%{http_code}]\n"
 ```
 
-**Rotating `velnor-admin`:** change it in MLflow *and* update the Secrets
-Manager value in the same maintenance window. The entrypoint reads
-`MLFLOW_ADMIN_PASSWORD` at boot, so if the two diverge the next task replacement
-recreates the admin from the stale secret.
+**Rotating `velnor-admin`:** MLflow is the authoritative store, not Secrets
+Manager. `create_admin_user()` is create-if-missing (`if not
+store.has_user(username)`), so the secret is read only on the **first** start of
+an empty auth database. A task replacement never re-applies it and never resets
+a password that has since been changed.
+
+Change it in MLflow first, then update the Secrets Manager value in the same
+maintenance window so the two agree. If they diverge, the live password is
+whatever MLflow holds and the secret is a stale value that `401`s — with nothing
+in the logs to say so.
 
 ## Step 6: Remove an account
 
@@ -232,9 +277,9 @@ their MLflow login — the two identity systems are unrelated.
 |---|---|
 | Created a user in error | Step 6 (delete) |
 | Granted admin in error | `update-admin` with `"is_admin":false` |
-| Granted a permission in error | `DELETE /api/3.0/mlflow/users/permissions/revoke` with the same `username` |
-| Changed a password and lost it | Reset it as `velnor-admin` via Step 5 |
-| Lost the `velnor-admin` password | Fetch it again from Secrets Manager (Step 1); it is not derived from anything local |
+| Granted a permission in error | `POST /api/3.0/mlflow/users/permissions/revoke` with the same `username`, `resource_type` and `resource_id` (note: `POST`, not `DELETE`) |
+| Changed a password and lost it | Reset it authenticated **as `velnor-admin`**: `PATCH .../users/update-password` with `-u "velnor-admin:$ADMIN_PW"` and the target user in the body — Step 5 as written authenticates as the user whose password is lost |
+| Lost the `velnor-admin` password | **Not recoverable from Secrets Manager if it was ever changed in MLflow.** That value only creates the admin on first start; a changed password is never written back. Reset it from another admin account (Step 3A) |
 
 No action here touches trace data. Deleting a user removes the login, not the
 traces they recorded.
