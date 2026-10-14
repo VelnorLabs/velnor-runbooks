@@ -95,7 +95,7 @@ leaking and *which* tool is involved, run the detail view query directly.
 
 ```bash
 psql "host=velnor-dev-aurora.cluster-<ID>.us-east-1.rds.amazonaws.com \
-      port=5432 dbname=velnor user=velnor_app sslmode=require"
+      port=5432 dbname=postgres user=velnor_app sslmode=require"
 ```
 
 ### 3b — Run per-schema forensic detail query

@@ -109,7 +109,7 @@ aws rds describe-db-instances \
 
 # 3. Run smoke check query via writer endpoint
 psql "host=velnor-dev-aurora.cluster-<ID>.us-east-1.rds.amazonaws.com \
-      port=5432 dbname=velnor user=velnor_app sslmode=require" \
+      port=5432 dbname=postgres user=velnor_app sslmode=require" \
   -c "SELECT current_database(), pg_is_in_recovery();"
 # Expected: pg_is_in_recovery() = false (writer is not in recovery mode)
 
@@ -197,7 +197,7 @@ After Aurora failover, verify that per-tenant schema routing is intact.
 ```bash
 # Connect to the new writer and confirm schemas are present
 psql "host=velnor-dev-aurora.cluster-<ID>.us-east-1.rds.amazonaws.com \
-      port=5432 dbname=velnor user=velnor_app sslmode=require" \
+      port=5432 dbname=postgres user=velnor_app sslmode=require" \
   -c "SELECT schema_name FROM information_schema.schemata
       WHERE schema_name LIKE 'velnor_t_%'
       ORDER BY schema_name;"
@@ -210,7 +210,7 @@ If schemas are missing or the new writer endpoint is returning errors, **do not 
 ```bash
 # 1. Confirm writer endpoint accepts connections
 psql "host=velnor-dev-aurora.cluster-<ID>.us-east-1.rds.amazonaws.com \
-      port=5432 dbname=velnor user=velnor_app sslmode=require" \
+      port=5432 dbname=postgres user=velnor_app sslmode=require" \
   -c "SELECT current_database(), pg_is_in_recovery(), now();"
 
 # 2. Write smoke test (confirms replication not accidentally still active)
